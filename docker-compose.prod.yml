@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: ./server
+      dockerfile: Dockerfile.prod
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - QDRANT_URL=http://qdrant:6333
+      - OXIGRAPH_URL=http://localhost:7878
+      - ENVIRONMENT=production
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-knowledge-mapper
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.prod
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-knowledge-mapper
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.3
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - ai-knowledge-mapper
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+
+volumes:
+  qdrant_data:
+    driver: local
+
+networks:
+  ai-knowledge-mapper:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

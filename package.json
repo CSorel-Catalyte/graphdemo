@@ -1,0 +1,26 @@
+{
+  "name": "ai-knowledge-mapper",
+  "version": "1.0.0",
+  "description": "AI-powered knowledge graph extraction and visualization system",
+  "scripts": {
+    "dev": "docker-compose up --build",
+    "dev:backend": "docker-compose up --build backend qdrant",
+    "dev:frontend": "docker-compose up --build frontend",
+    "build": "docker-compose build",
+    "down": "docker-compose down",
+    "clean": "docker-compose down -v --remove-orphans",
+    "logs": "docker-compose logs -f",
+    "logs:backend": "docker-compose logs -f backend",
+    "logs:frontend": "docker-compose logs -f frontend"
+  },
+  "keywords": [
+    "ai",
+    "knowledge-graph",
+    "llm",
+    "visualization",
+    "fastapi",
+    "react"
+  ],
+  "author": "AI Knowledge Mapper Team",
+  "license": "MIT"
+}
