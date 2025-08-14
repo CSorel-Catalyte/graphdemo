@@ -203,8 +203,11 @@ async def health_check():
             status_code = 200  # Still operational but degraded
         
         # Add basic environment info
+        from services.ai_provider import AIProviderFactory
+        provider_info = AIProviderFactory.get_provider_info()
+        
         overall_health["environment"] = {
-            "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+            "ai_provider": provider_info,
             "python_version": sys.version.split()[0],
             "log_level": os.getenv("LOG_LEVEL", "INFO")
         }
@@ -369,42 +372,46 @@ async def startup_event():
             logger.error(f"Failed to initialize Oxigraph: {e}")
             error_handler.record_error(ErrorClassifier.classify_error(e))
         
-        # Initialize IE service if OpenAI API key is available
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if openai_api_key:
-            try:
-                from services.ie_service import InformationExtractionService
-                ie_service = InformationExtractionService(api_key=openai_api_key)
-                logger.info("Information extraction service initialized")
-                
-                # Register OpenAI health check
-                async def check_openai_health():
-                    try:
-                        # Simple test call to check API availability
-                        response = await ie_service.client.embeddings.create(
-                            model="text-embedding-3-large",
-                            input="test",
-                            encoding_format="float"
-                        )
-                        return {"status": "healthy", "details": {"api_accessible": True}}
-                    except Exception as e:
-                        return {
-                            "status": "unhealthy",
-                            "details": {"api_accessible": False, "error": str(e)}
-                        }
-                
-                health_monitor.register_health_check(
-                    "openai_api",
-                    check_openai_health,
-                    interval_seconds=300,  # Check every 5 minutes
-                    critical=True
-                )
-                
-            except Exception as e:
-                logger.error(f"Failed to initialize IE service: {e}")
-                error_handler.record_error(ErrorClassifier.classify_error(e))
-        else:
-            logger.warning("OpenAI API key not found - information extraction will be disabled")
+        # Initialize AI provider and IE service
+        try:
+            from services.ai_provider import initialize_ai_provider, get_ai_provider, AIProviderFactory
+            from services.ie_service import InformationExtractionService
+            
+            # Initialize AI provider
+            ai_provider = initialize_ai_provider()
+            provider_info = AIProviderFactory.get_provider_info()
+            logger.info(f"AI provider initialized: {provider_info['provider']} ({provider_info['type']})")
+            
+            # Initialize IE service
+            ie_service = InformationExtractionService()
+            logger.info("Information extraction service initialized")
+            
+            # Register AI provider health check
+            async def check_ai_provider_health():
+                try:
+                    # Simple test call to check API availability
+                    response = await ai_provider.create_embedding(
+                        input_text="test",
+                        encoding_format="float"
+                    )
+                    return {"status": "healthy", "details": {"api_accessible": True, "provider": provider_info}}
+                except Exception as e:
+                    return {
+                        "status": "unhealthy",
+                        "details": {"api_accessible": False, "error": str(e), "provider": provider_info}
+                    }
+            
+            health_monitor.register_health_check(
+                "ai_provider",
+                check_ai_provider_health,
+                interval_seconds=300,  # Check every 5 minutes
+                critical=True
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize AI provider or IE service: {e}")
+            error_handler.record_error(ErrorClassifier.classify_error(e))
+            logger.warning("AI services will be disabled - information extraction will not be available")
         
         # Initialize canonicalizer
         if qdrant_adapter and qdrant_connected:
@@ -754,9 +761,11 @@ async def search_entities(q: str, k: int = 8):
         
         # Generate embedding for search query
         try:
-            response = await ie_service.client.embeddings.create(
-                model="text-embedding-3-large",
-                input=q.strip(),
+            from services.ai_provider import get_ai_provider
+            ai_provider = get_ai_provider()
+            
+            response = await ai_provider.create_embedding(
+                input_text=q.strip(),
                 encoding_format="float"
             )
             query_embedding = response.data[0].embedding

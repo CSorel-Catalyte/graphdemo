@@ -72,13 +72,12 @@ class QuestionAnsweringService:
             Question embedding vector
         """
         try:
-            if not self.ie_service.client:
-                raise Exception("OpenAI client not available")
+            if not self.ie_service.ai_provider:
+                raise Exception("AI provider not available")
             
-            # Use OpenAI's text-embedding-3-large model for consistency with entity embeddings
-            response = await self.ie_service.client.embeddings.create(
-                model="text-embedding-3-large",
-                input=question,
+            # Use the AI provider's embedding model for consistency with entity embeddings
+            response = await self.ie_service.ai_provider.create_embedding(
+                input_text=question,
                 encoding_format="float"
             )
             
@@ -277,8 +276,8 @@ class QuestionAnsweringService:
             Tuple of (answer, citations, confidence_score)
         """
         try:
-            if not self.ie_service.client:
-                raise Exception("OpenAI client not available")
+            if not self.ie_service.ai_provider:
+                raise Exception("AI provider not available")
             
             # Create system prompt for grounded answer generation
             system_prompt = """You are an expert knowledge assistant. Answer the user's question based ONLY on the provided knowledge graph context. 
@@ -301,13 +300,13 @@ Question: {question}
 
 Please provide a grounded answer based on the context above. Include specific references to entities and evidence from the knowledge graph."""
             
-            # Generate answer using OpenAI
-            response = await self.ie_service.client.chat.completions.create(
-                model=self.ie_service.model,
+            # Generate answer using AI provider
+            response = await self.ie_service.ai_provider.create_chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
+                model=self.ie_service.model,
                 temperature=0.1,  # Low temperature for factual responses
                 max_tokens=1000,  # Reasonable limit for answers
                 timeout=30.0

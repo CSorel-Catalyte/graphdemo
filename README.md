@@ -13,7 +13,7 @@ An interactive AI-powered knowledge graph system that converts arbitrary text in
 ## Prerequisites
 
 - Docker and Docker Compose
-- OpenAI API key
+- AI Provider: Either OpenAI API key OR Azure OpenAI configuration
 
 ## Quick Start
 
@@ -32,6 +32,55 @@ An interactive AI-powered knowledge graph system that converts arbitrary text in
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8000
    - API Documentation: http://localhost:8000/docs
+
+## AI Provider Configuration
+
+The AI Knowledge Mapper supports both OpenAI and Azure OpenAI as AI providers. Configure one of the following options in your `.env` file:
+
+### Option 1: OpenAI (Default)
+
+```bash
+# Standard OpenAI Configuration
+AI_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-3.5-turbo-1106
+OPENAI_EMBEDDING_MODEL=text-embedding-3-large
+```
+
+### Option 2: Azure OpenAI
+
+```bash
+# Azure OpenAI Configuration
+AI_PROVIDER=azure
+AZURE_OPENAI_API_KEY=your_azure_openai_api_key_here
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-02-15-preview
+AZURE_OPENAI_CHAT_DEPLOYMENT=your-gpt-deployment-name
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=your-embedding-deployment-name
+```
+
+### Configuration Notes
+
+- **OpenAI**: Requires an OpenAI API key with access to GPT models and embeddings
+- **Azure OpenAI**: Requires Azure OpenAI resource with deployed models
+- **Model Requirements**: 
+  - Chat model must support JSON mode (GPT-3.5-turbo-1106+ or GPT-4)
+  - Embedding model should be text-embedding-3-large or equivalent
+- **Deployment Names**: For Azure, use your actual deployment names, not model names
+
+### Verifying Configuration
+
+Check your AI provider configuration:
+
+```bash
+# Check health endpoint for provider status
+curl http://localhost:8000/health
+
+# Validate demo setup (includes AI provider check)
+python validate_demo_setup.py --quick
+```
+
+The health endpoint will show your configured AI provider and its status.
 
 ## WSL Deployment
 

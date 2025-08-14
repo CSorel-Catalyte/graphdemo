@@ -1,5 +1,5 @@
 """
-Information Extraction Service using OpenAI API.
+Information Extraction Service using AI providers (OpenAI or Azure OpenAI).
 
 This module provides LLM-based entity and relationship extraction from text chunks
 with strict JSON parsing, retry logic, and comprehensive error handling.
@@ -13,13 +13,6 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import logging
 
-try:
-    from openai import AsyncOpenAI
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    AsyncOpenAI = None
-
 from pydantic import ValidationError
 
 from models.core import Entity, Relationship, IEResult, EntityType, RelationType, Evidence, SourceSpan
@@ -27,6 +20,7 @@ from utils.error_handling import (
     error_handler, with_retry, handle_graceful_degradation,
     RetryConfig, ErrorClassifier
 )
+from services.ai_provider import BaseAIProvider, get_ai_provider, AIProviderError
 
 
 # Configure logging
@@ -49,12 +43,12 @@ class JSONParsingError(IEServiceError):
 
 
 class InformationExtractionService:
-    """Service for extracting entities and relationships from text using OpenAI API."""
+    """Service for extracting entities and relationships from text using AI providers (OpenAI or Azure OpenAI)."""
     
     def __init__(
         self,
-        api_key: str,
-        model: str = "gpt-3.5-turbo-1106",
+        ai_provider: Optional[BaseAIProvider] = None,
+        model: Optional[str] = None,
         max_retries: int = 3,
         base_delay: float = 1.0,
         max_delay: float = 60.0
@@ -63,26 +57,28 @@ class InformationExtractionService:
         Initialize the Information Extraction Service.
         
         Args:
-            api_key: OpenAI API key
-            model: OpenAI model to use (must support JSON mode)
+            ai_provider: AI provider instance (if None, will use global provider)
+            model: Model to use (if None, will use provider's default)
             max_retries: Maximum number of retry attempts
             base_delay: Base delay for exponential backoff (seconds)
             max_delay: Maximum delay between retries (seconds)
         """
-        if not OPENAI_AVAILABLE:
-            logger.warning("OpenAI library not available. IE service will have limited functionality.")
-            self.client = None
-        else:
-            self.client = AsyncOpenAI(api_key=api_key)
+        try:
+            self.ai_provider = ai_provider or get_ai_provider()
+            self.model = model or self.ai_provider.get_default_chat_model()
+            logger.info(f"Initialized IE service with provider: {type(self.ai_provider).__name__}, model: {self.model}")
+        except AIProviderError as e:
+            logger.error(f"Failed to initialize AI provider: {e}")
+            self.ai_provider = None
+            self.model = None
         
-        self.model = model
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.max_delay = max_delay
         
-        # Validate model supports JSON mode
-        if "1106" not in model and "0125" not in model:
-            logger.warning(f"Model {model} may not support JSON mode. Consider using gpt-3.5-turbo-1106 or gpt-4-1106-preview")
+        # Validate model supports JSON mode (for OpenAI models)
+        if self.model and ("1106" not in self.model and "0125" not in self.model and "gpt-4" not in self.model):
+            logger.warning(f"Model {self.model} may not support JSON mode. Consider using a model that supports structured output.")
     
     def _get_extraction_prompt(self) -> str:
         """
@@ -293,7 +289,7 @@ Return valid JSON with this exact structure:
 
     @with_retry(
         retry_config=RetryConfig(max_retries=3, base_delay=1.0, max_delay=60.0),
-        circuit_breaker_name="openai_api",
+        circuit_breaker_name="ai_provider_api",
         context={"service": "information_extraction", "operation": "llm_request"}
     )
     async def _make_llm_request(self, chunk_text: str) -> str:
@@ -309,16 +305,18 @@ Return valid JSON with this exact structure:
         Raises:
             LLMAPIError: If request fails
         """
-        if not OPENAI_AVAILABLE or self.client is None:
-            raise LLMAPIError("OpenAI client not available. Please install the openai package.")
+        if not self.ai_provider:
+            raise LLMAPIError("AI provider not available. Please configure OpenAI or Azure OpenAI.")
         
         try:
-            response = await self.client.chat.completions.create(
+            messages = [
+                {"role": "system", "content": self._get_extraction_prompt()},
+                {"role": "user", "content": f"Extract entities and relationships from this text:\n\n{chunk_text}"}
+            ]
+            
+            response = await self.ai_provider.create_chat_completion(
+                messages=messages,
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": self._get_extraction_prompt()},
-                    {"role": "user", "content": f"Extract entities and relationships from this text:\n\n{chunk_text}"}
-                ],
                 response_format={"type": "json_object"},
                 temperature=0.1,  # Low temperature for consistent extraction
                 max_tokens=4000,  # Sufficient for complex extractions
