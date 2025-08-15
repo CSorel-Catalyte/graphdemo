@@ -40,8 +40,6 @@ const Graph3D: React.FC = () => {
     try {
       const { getNeighbors } = await import('../utils/api');
       const data = await getNeighbors({ node_id: nodeId, hops: 1, limit: 200 });
-      // The backend should broadcast the new nodes/edges via WebSocket
-      // so we don't need to manually update the store here
       console.log(`Expanded neighborhood for node ${nodeId}:`, data);
     } catch (error) {
       console.error('Failed to expand node neighborhood:', error);
@@ -86,6 +84,13 @@ const Graph3D: React.FC = () => {
     // Update cursor
     document.body.style.cursor = node ? 'pointer' : 'default';
     
+    // Release previous node if it was fixed
+    if (prevNode && prevNode.fx !== undefined) {
+      delete prevNode.fx;
+      delete prevNode.fy;
+      delete prevNode.fz;
+    }
+    
     // Update hover state
     setHoveredNode(node);
     
@@ -94,6 +99,13 @@ const Graph3D: React.FC = () => {
       const coords = graphRef.current.graph2ScreenCoords(node.x, node.y, node.z);
       if (coords) {
         setTooltipPosition({ x: coords.x, y: coords.y });
+      }
+      
+      // Temporarily fix the hovered node position to prevent movement
+      if (node.x !== undefined && node.y !== undefined && node.z !== undefined) {
+        node.fx = node.x;
+        node.fy = node.y;
+        node.fz = node.z;
       }
     } else {
       setTooltipPosition(null);
@@ -148,22 +160,22 @@ const Graph3D: React.FC = () => {
   // Individual edge opacity will be handled through linkColor alpha channel
   const linkOpacity = 0.8;
 
-  // Node label configuration
+  // Node label configuration - always show node name
   const nodeLabel = useCallback((node: UINode) => {
     return `
       <div style="
-        background: rgba(0, 0, 0, 0.8); 
+        background: rgba(0, 0, 0, 0.9); 
         color: white; 
-        padding: 8px 12px; 
-        border-radius: 4px; 
-        font-size: 12px;
+        padding: 6px 10px; 
+        border-radius: 6px; 
+        font-size: 14px;
+        font-weight: bold;
         max-width: 200px;
         text-align: center;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
       ">
-        <strong>${node.name}</strong><br/>
-        Type: ${node.type}<br/>
-        Salience: ${(node.salience * 100).toFixed(1)}%<br/>
-        Evidence: ${node.evidence_count} sources
+        ${node.name}
       </div>
     `;
   }, []);
@@ -356,6 +368,8 @@ const Graph3D: React.FC = () => {
         nodeLabel={nodeLabel}
         onNodeClick={handleNodeClick}
         onNodeHover={handleNodeHover}
+        showNavInfo={false}
+        nodeAutoColorBy="type"
         
         // Edge configuration
         linkColor={linkColor}
@@ -364,6 +378,7 @@ const Graph3D: React.FC = () => {
         linkDirectionalArrowLength={3}
         linkDirectionalArrowRelPos={1}
         linkCurvature={0.1}
+        linkLabel={(edge: UIEdge) => edge.predicate}
         
         // Physics configuration
         numDimensions={3}
@@ -371,7 +386,6 @@ const Graph3D: React.FC = () => {
         cooldownTime={15000}
         
         // Camera configuration
-        showNavInfo={false}
         controlType="orbit"
         
         // Performance optimizations
