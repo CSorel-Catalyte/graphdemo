@@ -12,8 +12,57 @@ An interactive AI-powered knowledge graph system that converts arbitrary text in
 
 ## Prerequisites
 
-- Docker and Docker Compose
-- AI Provider: Either OpenAI API key OR Azure OpenAI configuration
+- **Docker Engine** and **Docker Compose** (Docker Desktop is optional)
+- **AI Provider**: Either OpenAI API key OR Azure OpenAI configuration
+
+### Docker Installation Options
+
+You have several options for running Docker:
+
+#### Option 1: Docker Engine + Docker Compose (Lightweight)
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install docker.io docker-compose-plugin
+
+# Or install Docker Compose standalone
+sudo apt install docker-compose
+
+# Add user to docker group (logout/login required)
+sudo usermod -aG docker $USER
+```
+
+#### Option 2: Docker Desktop (Full GUI)
+- Download from [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Includes Docker Engine, Docker Compose, and GUI management
+- Heavier resource usage but easier management
+
+#### Option 3: WSL2 with Docker Engine
+```bash
+# In WSL2 Ubuntu
+sudo apt update
+sudo apt install docker.io docker-compose-plugin
+sudo service docker start
+
+# Or use Docker Desktop with WSL2 integration
+```
+
+**Recommendation**: For development and demos, Docker Engine + Docker Compose is sufficient and more resource-efficient than Docker Desktop.
+
+### Verify Docker Installation
+```bash
+# Check Docker Engine
+docker --version
+# Expected: Docker version 20.10.0+
+
+# Check Docker Compose
+docker-compose --version
+# Expected: docker-compose version 1.29.0+ or Docker Compose version 2.0.0+
+
+# Test Docker functionality
+docker run hello-world
+# Should download and run successfully
+```
 
 ## Quick Start
 
@@ -89,7 +138,9 @@ For Windows users, you can deploy and run the application in Windows Subsystem f
 ### Prerequisites for WSL
 - Windows 10/11 with WSL2 enabled
 - Ubuntu 20.04+ or similar Linux distribution in WSL
-- Docker Desktop for Windows with WSL2 integration enabled
+- **Docker options** (choose one):
+  - Docker Engine installed directly in WSL2 (lightweight)
+  - Docker Desktop for Windows with WSL2 integration (heavier but easier)
 
 ### WSL Setup and Deployment
 
@@ -153,7 +204,18 @@ For Windows users, you can deploy and run the application in Windows Subsystem f
 
 ### WSL-Specific Notes
 
-- **Docker Integration**: Ensure Docker Desktop has WSL2 integration enabled for your distribution
+#### Docker Engine in WSL2 (Recommended for lightweight setup)
+- **Installation**: Install Docker Engine directly in WSL2 using apt
+- **Service Management**: Start Docker with `sudo service docker start`
+- **Auto-start**: Add to `.bashrc` or `.zshrc` for automatic startup
+- **Resource Usage**: Lower memory and CPU usage compared to Docker Desktop
+
+#### Docker Desktop with WSL2 Integration
+- **Integration**: Ensure Docker Desktop has WSL2 integration enabled for your distribution
+- **GUI Management**: Provides graphical interface for container management
+- **Resource Usage**: Higher memory usage but easier management
+
+#### General WSL Notes
 - **Port Forwarding**: WSL2 automatically forwards ports to Windows, so localhost should work from Windows browsers
 - **File System**: Keep project files in the WSL file system (`/home/username/`) for better performance
 - **Memory Limits**: WSL2 uses dynamic memory allocation, but you can configure limits in `.wslconfig` if needed
@@ -162,11 +224,17 @@ For Windows users, you can deploy and run the application in Windows Subsystem f
 
 **Docker Issues:**
 ```bash
-# Restart Docker service in WSL
+# For Docker Engine in WSL2
 sudo service docker start
-
-# Check Docker status
 sudo service docker status
+
+# For Docker Desktop
+# Use Docker Desktop GUI or restart from Windows
+
+# Check if Docker is working
+docker --version
+docker-compose --version
+docker ps
 ```
 
 **Port Access Issues:**
