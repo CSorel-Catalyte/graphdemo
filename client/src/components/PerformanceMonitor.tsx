@@ -89,7 +89,8 @@ const PerformanceMonitor: React.FC<PerformanceMonitorProps> = ({
 
     const startTime = performance.now();
     try {
-      await fetch('/api/health', { method: 'HEAD' });
+      const { checkHealth } = await import('../utils/api');
+      await checkHealth();
       const latency = Math.round(performance.now() - startTime);
       setMetrics(prev => ({ ...prev, networkLatency: latency }));
     } catch (error) {

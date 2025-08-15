@@ -5,7 +5,6 @@ Handles triple storage, SPARQL queries, and neighborhood expansion.
 
 import logging
 from typing import List, Optional, Dict, Any, Set, Tuple
-from oxigraph import Store, NamedNode, Literal, BlankNode, Triple, Quad
 import tempfile
 import os
 from datetime import datetime
@@ -13,6 +12,25 @@ import json
 import asyncio
 
 from models.core import Entity, Relationship, RelationType, Evidence
+
+# Try to import pyoxigraph with proper error handling
+try:
+    from pyoxigraph import Store, NamedNode, Literal, BlankNode, Triple, Quad
+    OXIGRAPH_AVAILABLE = True
+except ImportError as e:
+    OXIGRAPH_AVAILABLE = False
+    Store = None
+    NamedNode = None
+    Literal = None
+    BlankNode = None
+    Triple = None
+    Quad = None
+    print(f"Storage dependencies not available: {e}")
+
+
+class OxigraphNotAvailableError(Exception):
+    """Exception raised when oxigraph is not available but required"""
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +44,15 @@ class OxigraphAdapter:
         
         Args:
             store_path: Path to persistent store (None for in-memory)
+            
+        Raises:
+            OxigraphNotAvailableError: If oxigraph package is not installed
         """
+        if not OXIGRAPH_AVAILABLE:
+            raise OxigraphNotAvailableError(
+                "Pyoxigraph package is not installed. Please install it with: pip install pyoxigraph==0.3.22"
+            )
+            
         self.store_path = store_path
         self.store = None
         self._temp_dir = None
@@ -42,7 +68,16 @@ class OxigraphAdapter:
         
         Returns:
             bool: True if initialization successful, False otherwise
+            
+        Raises:
+            OxigraphNotAvailableError: If oxigraph package is not installed
         """
+        if not OXIGRAPH_AVAILABLE:
+            raise OxigraphNotAvailableError(
+                "Cannot connect to Oxigraph store: pyoxigraph package is not installed. "
+                "Please install it with: pip install pyoxigraph==0.3.22"
+            )
+            
         try:
             if self.store_path:
                 # Use persistent store
@@ -87,12 +122,13 @@ class OxigraphAdapter:
             ]
             
             for subject, predicate, obj in schema_triples:
-                triple = Triple(
+                quad = Quad(
                     NamedNode(subject),
                     NamedNode(predicate),
-                    NamedNode(obj)
+                    NamedNode(obj),
+                    None  # Default graph
                 )
-                self.store.add(triple)
+                self.store.add(quad)
                 
             logger.debug("Initialized RDF schema")
             
@@ -117,39 +153,39 @@ class OxigraphAdapter:
         try:
             entity_uri = NamedNode(f"{self.kg_ns}entity/{entity.id}")
             
-            # Core entity triples
-            triples = [
-                Triple(entity_uri, NamedNode(f"{self.rdf_ns}type"), NamedNode(f"{self.kg_ns}{entity.type.value}")),
-                Triple(entity_uri, NamedNode(f"{self.kg_ns}name"), Literal(entity.name)),
-                Triple(entity_uri, NamedNode(f"{self.kg_ns}type"), Literal(entity.type.value)),
-                Triple(entity_uri, NamedNode(f"{self.kg_ns}salience"), Literal(str(entity.salience))),
-                Triple(entity_uri, NamedNode(f"{self.kg_ns}summary"), Literal(entity.summary)),
-                Triple(entity_uri, NamedNode(f"{self.kg_ns}created_at"), Literal(entity.created_at.isoformat())),
-                Triple(entity_uri, NamedNode(f"{self.kg_ns}updated_at"), Literal(entity.updated_at.isoformat())),
+            # Core entity quads
+            quads = [
+                Quad(entity_uri, NamedNode(f"{self.rdf_ns}type"), NamedNode(f"{self.kg_ns}{entity.type.value}"), None),
+                Quad(entity_uri, NamedNode(f"{self.kg_ns}name"), Literal(entity.name), None),
+                Quad(entity_uri, NamedNode(f"{self.kg_ns}type"), Literal(entity.type.value), None),
+                Quad(entity_uri, NamedNode(f"{self.kg_ns}salience"), Literal(str(entity.salience)), None),
+                Quad(entity_uri, NamedNode(f"{self.kg_ns}summary"), Literal(entity.summary), None),
+                Quad(entity_uri, NamedNode(f"{self.kg_ns}created_at"), Literal(entity.created_at.isoformat()), None),
+                Quad(entity_uri, NamedNode(f"{self.kg_ns}updated_at"), Literal(entity.updated_at.isoformat()), None),
             ]
             
             # Add aliases
             for alias in entity.aliases:
-                triples.append(
-                    Triple(entity_uri, NamedNode(f"{self.kg_ns}alias"), Literal(alias))
+                quads.append(
+                    Quad(entity_uri, NamedNode(f"{self.kg_ns}alias"), Literal(alias), None)
                 )
             
             # Add source spans
             for i, span in enumerate(entity.source_spans):
                 span_node = BlankNode(f"span_{entity.id}_{i}")
-                triples.extend([
-                    Triple(entity_uri, NamedNode(f"{self.kg_ns}source_span"), span_node),
-                    Triple(span_node, NamedNode(f"{self.kg_ns}doc_id"), Literal(span.doc_id)),
-                    Triple(span_node, NamedNode(f"{self.kg_ns}start"), Literal(str(span.start))),
-                    Triple(span_node, NamedNode(f"{self.kg_ns}end"), Literal(str(span.end))),
+                quads.extend([
+                    Quad(entity_uri, NamedNode(f"{self.kg_ns}source_span"), span_node, None),
+                    Quad(span_node, NamedNode(f"{self.kg_ns}doc_id"), Literal(span.doc_id), None),
+                    Quad(span_node, NamedNode(f"{self.kg_ns}start"), Literal(str(span.start)), None),
+                    Quad(span_node, NamedNode(f"{self.kg_ns}end"), Literal(str(span.end)), None),
                 ])
             
             # Remove existing triples for this entity (upsert behavior)
             await self._remove_entity_triples(entity.id)
             
-            # Add new triples
-            for triple in triples:
-                self.store.add(triple)
+            # Add new quads
+            for quad in quads:
+                self.store.add(quad)
             
             logger.debug(f"Stored entity {entity.id} ({entity.name}) as RDF triples")
             return True
@@ -181,37 +217,37 @@ class OxigraphAdapter:
             rel_id = f"{relationship.from_entity}_{relationship.predicate.value}_{relationship.to_entity}"
             rel_uri = NamedNode(f"{self.kg_ns}relationship/{rel_id}")
             
-            # Core relationship triples
-            triples = [
-                # Main relationship triple
-                Triple(from_uri, predicate_uri, to_uri),
+            # Core relationship quads
+            quads = [
+                # Main relationship quad
+                Quad(from_uri, predicate_uri, to_uri, None),
                 
                 # Relationship metadata
-                Triple(rel_uri, NamedNode(f"{self.rdf_ns}type"), NamedNode(f"{self.kg_ns}Relationship")),
-                Triple(rel_uri, NamedNode(f"{self.kg_ns}from"), from_uri),
-                Triple(rel_uri, NamedNode(f"{self.kg_ns}to"), to_uri),
-                Triple(rel_uri, NamedNode(f"{self.kg_ns}predicate"), Literal(relationship.predicate.value)),
-                Triple(rel_uri, NamedNode(f"{self.kg_ns}confidence"), Literal(str(relationship.confidence))),
-                Triple(rel_uri, NamedNode(f"{self.kg_ns}directional"), Literal(str(relationship.directional).lower())),
-                Triple(rel_uri, NamedNode(f"{self.kg_ns}created_at"), Literal(relationship.created_at.isoformat())),
+                Quad(rel_uri, NamedNode(f"{self.rdf_ns}type"), NamedNode(f"{self.kg_ns}Relationship"), None),
+                Quad(rel_uri, NamedNode(f"{self.kg_ns}from"), from_uri, None),
+                Quad(rel_uri, NamedNode(f"{self.kg_ns}to"), to_uri, None),
+                Quad(rel_uri, NamedNode(f"{self.kg_ns}predicate"), Literal(relationship.predicate.value), None),
+                Quad(rel_uri, NamedNode(f"{self.kg_ns}confidence"), Literal(str(relationship.confidence)), None),
+                Quad(rel_uri, NamedNode(f"{self.kg_ns}directional"), Literal(str(relationship.directional).lower()), None),
+                Quad(rel_uri, NamedNode(f"{self.kg_ns}created_at"), Literal(relationship.created_at.isoformat()), None),
             ]
             
             # Add evidence
             for i, evidence in enumerate(relationship.evidence):
                 evidence_node = BlankNode(f"evidence_{rel_id}_{i}")
-                triples.extend([
-                    Triple(rel_uri, NamedNode(f"{self.kg_ns}evidence"), evidence_node),
-                    Triple(evidence_node, NamedNode(f"{self.kg_ns}doc_id"), Literal(evidence.doc_id)),
-                    Triple(evidence_node, NamedNode(f"{self.kg_ns}quote"), Literal(evidence.quote)),
-                    Triple(evidence_node, NamedNode(f"{self.kg_ns}offset"), Literal(str(evidence.offset))),
+                quads.extend([
+                    Quad(rel_uri, NamedNode(f"{self.kg_ns}evidence"), evidence_node, None),
+                    Quad(evidence_node, NamedNode(f"{self.kg_ns}doc_id"), Literal(evidence.doc_id), None),
+                    Quad(evidence_node, NamedNode(f"{self.kg_ns}quote"), Literal(evidence.quote), None),
+                    Quad(evidence_node, NamedNode(f"{self.kg_ns}offset"), Literal(str(evidence.offset)), None),
                 ])
             
             # Remove existing relationship triples (upsert behavior)
             await self._remove_relationship_triples(rel_id)
             
-            # Add new triples
-            for triple in triples:
-                self.store.add(triple)
+            # Add new quads
+            for quad in quads:
+                self.store.add(quad)
             
             logger.debug(f"Stored relationship {relationship.from_entity} -> {relationship.to_entity}")
             return True
@@ -253,24 +289,23 @@ class OxigraphAdapter:
                 type_filter = f"FILTER(?predicate_name IN ({type_values}))"
             
             if hops == 1:
-                # 1-hop neighbors
+                # 1-hop neighbors - very simple query
                 sparql_query = f"""
                 PREFIX kg: <{self.kg_ns}>
                 PREFIX rdf: <{self.rdf_ns}>
                 
-                SELECT DISTINCT ?neighbor ?neighbor_name ?neighbor_type ?predicate_name ?confidence ?directional
+                SELECT DISTINCT ?neighbor ?neighbor_name ?neighbor_type ?predicate
                 WHERE {{
                     {{
                         <{entity_uri}> ?predicate ?neighbor .
                         ?neighbor kg:name ?neighbor_name .
                         ?neighbor kg:type ?neighbor_type .
                         
-                        # Get relationship metadata
-                        ?rel_uri kg:from <{entity_uri}> ;
-                                kg:to ?neighbor ;
-                                kg:predicate ?predicate_name ;
-                                kg:confidence ?confidence ;
-                                kg:directional ?directional .
+                        FILTER(?predicate != <{self.rdf_ns}type>)
+                        FILTER(?predicate != <{self.kg_ns}name>)
+                        FILTER(?predicate != <{self.kg_ns}type>)
+                        FILTER(?predicate != <{self.kg_ns}created_at>)
+                        FILTER(?predicate != <{self.kg_ns}updated_at>)
                     }}
                     UNION
                     {{
@@ -278,15 +313,12 @@ class OxigraphAdapter:
                         ?neighbor kg:name ?neighbor_name .
                         ?neighbor kg:type ?neighbor_type .
                         
-                        # Get relationship metadata (reverse direction)
-                        ?rel_uri kg:from ?neighbor ;
-                                kg:to <{entity_uri}> ;
-                                kg:predicate ?predicate_name ;
-                                kg:confidence ?confidence ;
-                                kg:directional ?directional .
+                        FILTER(?predicate != <{self.rdf_ns}type>)
+                        FILTER(?predicate != <{self.kg_ns}name>)
+                        FILTER(?predicate != <{self.kg_ns}type>)
+                        FILTER(?predicate != <{self.kg_ns}created_at>)
+                        FILTER(?predicate != <{self.kg_ns}updated_at>)
                     }}
-                    
-                    {type_filter}
                 }}
                 LIMIT {limit}
                 """
@@ -339,14 +371,50 @@ class OxigraphAdapter:
             # Execute SPARQL query
             results = []
             for result in self.store.query(sparql_query):
+                # Extract predicate name from URI
+                predicate_uri = str(result["predicate"])
+                predicate_name = predicate_uri.replace(f"{self.kg_ns}", "")
+                
+                # Handle optional confidence and directional values
+                confidence = 0.8  # Default confidence
+                directional = True  # Default directional
+                hop_count = 1  # Default hop count
+                
+                # Check if confidence exists in result
+                try:
+                    if "confidence" in result:
+                        confidence_str = str(result["confidence"])
+                        if confidence_str.startswith('"') and confidence_str.endswith('"'):
+                            confidence_str = confidence_str[1:-1]
+                        elif '^^' in confidence_str:
+                            confidence_str = confidence_str.split('^^')[0].strip('"')
+                        confidence = float(confidence_str)
+                except (ValueError, TypeError, KeyError):
+                    confidence = 0.8
+                
+                # Check if directional exists in result
+                try:
+                    if "directional" in result:
+                        directional_str = str(result["directional"]).strip('"').lower()
+                        directional = directional_str == "true"
+                except (ValueError, TypeError, KeyError):
+                    directional = True
+                
+                # Check if hop_count exists in result
+                try:
+                    if "hop_count" in result:
+                        hop_count = int(str(result["hop_count"]))
+                except (ValueError, TypeError, KeyError):
+                    hop_count = 1
+                
                 neighbor_info = {
                     "entity_id": str(result["neighbor"]).replace(f"{self.kg_ns}entity/", ""),
-                    "name": str(result["neighbor_name"]),
-                    "type": str(result["neighbor_type"]),
-                    "predicate": str(result["predicate_name"]),
-                    "confidence": float(str(result["confidence"])),
-                    "directional": str(result["directional"]).lower() == "true",
-                    "hop_count": int(str(result.get("hop_count", 1)))
+                    "name": str(result["neighbor_name"]).strip('"'),
+                    "type": str(result["neighbor_type"]).strip('"'),
+                    "predicate": predicate_name,
+                    "confidence": confidence,
+                    "directional": directional,
+                    "hop_count": hop_count
                 }
                 results.append(neighbor_info)
             
@@ -474,7 +542,11 @@ class OxigraphAdapter:
             entity_counts = {}
             for result in self.store.query(entity_count_query):
                 entity_type = str(result["type"])
-                count = int(str(result["count"]))
+                # Extract numeric value from SPARQL result (removes XML Schema type annotation)
+                count_str = str(result["count"])
+                if '^^' in count_str:
+                    count_str = count_str.split('^^')[0].strip('"')
+                count = int(count_str)
                 entity_counts[entity_type] = count
             
             stats["entity_counts"] = entity_counts
@@ -494,7 +566,11 @@ class OxigraphAdapter:
             relationship_counts = {}
             for result in self.store.query(rel_count_query):
                 predicate = str(result["predicate"])
-                count = int(str(result["count"]))
+                # Extract numeric value from SPARQL result (removes XML Schema type annotation)
+                count_str = str(result["count"])
+                if '^^' in count_str:
+                    count_str = count_str.split('^^')[0].strip('"')
+                count = int(count_str)
                 relationship_counts[predicate] = count
             
             stats["relationship_counts"] = relationship_counts
@@ -533,12 +609,20 @@ class OxigraphAdapter:
             entities = []
             for result in self.store.query(entities_query):
                 entity_id = str(result["entity"]).replace(f"{self.kg_ns}entity/", "")
+                
+                # Parse salience value from RDF literal
+                salience_str = str(result["salience"])
+                if salience_str.startswith('"') and salience_str.endswith('"'):
+                    salience_str = salience_str[1:-1]  # Remove quotes
+                elif '^^' in salience_str:
+                    salience_str = salience_str.split('^^')[0].strip('"')
+                
                 entities.append({
                     "id": entity_id,
-                    "name": str(result["name"]),
-                    "type": str(result["type"]),
-                    "salience": float(str(result["salience"])),
-                    "summary": str(result["summary"])
+                    "name": str(result["name"]).strip('"'),
+                    "type": str(result["type"]).strip('"'),
+                    "salience": float(salience_str),
+                    "summary": str(result["summary"]).strip('"')
                 })
             
             # Export relationships
@@ -557,12 +641,22 @@ class OxigraphAdapter:
             
             relationships = []
             for result in self.store.query(relationships_query):
+                # Parse confidence value from RDF literal
+                confidence_str = str(result["confidence"])
+                if confidence_str.startswith('"') and confidence_str.endswith('"'):
+                    confidence_str = confidence_str[1:-1]  # Remove quotes
+                elif '^^' in confidence_str:
+                    confidence_str = confidence_str.split('^^')[0].strip('"')
+                
+                # Parse directional value from RDF literal
+                directional_str = str(result["directional"]).strip('"').lower()
+                
                 relationships.append({
                     "from": str(result["from_entity"]).replace(f"{self.kg_ns}entity/", ""),
                     "to": str(result["to_entity"]).replace(f"{self.kg_ns}entity/", ""),
-                    "predicate": str(result["predicate"]),
-                    "confidence": float(str(result["confidence"])),
-                    "directional": str(result["directional"]).lower() == "true"
+                    "predicate": str(result["predicate"]).strip('"'),
+                    "confidence": float(confidence_str),
+                    "directional": directional_str == "true"
                 })
             
             return {
@@ -641,6 +735,10 @@ class OxigraphAdapter:
             "relationship_count": 0,
             "error": None
         }
+        
+        if not OXIGRAPH_AVAILABLE:
+            health_info["error"] = "Pyoxigraph package not installed"
+            return health_info
         
         try:
             if not self.store:

@@ -4,7 +4,7 @@ pydantic==2.5.0
 python-multipart==0.0.6
 websockets==12.0
 qdrant-client==1.7.0
-oxigraph==0.4.11
+pyoxigraph==0.3.22
 openai>=1.60.2
 numpy==1.24.3
 scikit-learn==1.3.2

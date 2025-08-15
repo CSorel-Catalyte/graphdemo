@@ -6,7 +6,7 @@
 import { GraphExportResponse, IngestRequest, IngestResponse, SearchRequest, SearchResponse, NeighborsRequest, NeighborsResponse, QuestionRequest, QuestionResponse } from '../types/api';
 import { handleAsyncError, RetryManager } from './errorHandling';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const API_BASE_URL = 'http://localhost:8000';
 
 // Request timeout configuration
 const DEFAULT_TIMEOUT = 30000; // 30 seconds

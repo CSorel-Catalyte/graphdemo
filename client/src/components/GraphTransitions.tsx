@@ -95,7 +95,7 @@ const GraphTransitions: React.FC<GraphTransitionsProps> = ({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       setParticles(prevParticles => {
-        return prevParticles.map(particle => {
+        const updatedParticles = prevParticles.map(particle => {
           // Update particle position
           particle.x += particle.vx;
           particle.y += particle.vy;
@@ -122,29 +122,31 @@ const GraphTransitions: React.FC<GraphTransitionsProps> = ({
 
           return particle;
         });
-      });
 
-      // Draw connections between nearby particles
-      ctx.globalAlpha = 0.1;
-      ctx.strokeStyle = '#6b7280';
-      ctx.lineWidth = 1;
+        // Draw connections between nearby particles
+        ctx.globalAlpha = 0.1;
+        ctx.strokeStyle = '#6b7280';
+        ctx.lineWidth = 1;
 
-      particles.forEach((particle1, i) => {
-        particles.slice(i + 1).forEach(particle2 => {
-          const dx = particle1.x - particle2.x;
-          const dy = particle1.y - particle2.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
+        updatedParticles.forEach((particle1, i) => {
+          updatedParticles.slice(i + 1).forEach(particle2 => {
+            const dx = particle1.x - particle2.x;
+            const dy = particle1.y - particle2.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
 
-          if (distance < 100) {
-            ctx.beginPath();
-            ctx.moveTo(particle1.x, particle1.y);
-            ctx.lineTo(particle2.x, particle2.y);
-            ctx.stroke();
-          }
+            if (distance < 100) {
+              ctx.beginPath();
+              ctx.moveTo(particle1.x, particle1.y);
+              ctx.lineTo(particle2.x, particle2.y);
+              ctx.stroke();
+            }
+          });
         });
+
+        ctx.globalAlpha = 1;
+        return updatedParticles;
       });
 
-      ctx.globalAlpha = 1;
       animationRef.current = requestAnimationFrame(animate);
     };
 
@@ -156,7 +158,7 @@ const GraphTransitions: React.FC<GraphTransitionsProps> = ({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isVisible, particles]);
+  }, [isVisible]);
 
   // Connection pulse effect
   const triggerConnectionPulse = () => {

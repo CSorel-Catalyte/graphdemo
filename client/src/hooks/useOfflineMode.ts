@@ -33,12 +33,9 @@ export const useOfflineMode = () => {
   // Test backend connectivity
   const testBackendConnectivity = useCallback(async (): Promise<boolean> => {
     try {
-      const response = await fetch('/api/health', {
-        method: 'GET',
-        timeout: 5000, // 5 second timeout
-      } as RequestInit);
-      
-      return response.ok;
+      const { checkHealth } = await import('../utils/api');
+      await checkHealth();
+      return true;
     } catch (error) {
       console.warn('Backend connectivity test failed:', error);
       return false;

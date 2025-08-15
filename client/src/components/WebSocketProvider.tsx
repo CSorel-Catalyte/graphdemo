@@ -8,6 +8,7 @@ import { useKnowledgeMapperWebSocket } from '../hooks/useWebSocket';
 import { useStore } from '../store/useStore';
 import { useOfflineMode } from '../hooks/useOfflineMode';
 import { ConnectionState } from '../types/websocket';
+import { exportGraph } from '../utils/api';
 
 interface WebSocketProviderProps {
   children: React.ReactNode;
@@ -15,16 +16,39 @@ interface WebSocketProviderProps {
 
 const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }) => {
   const { connectionState, isConnected, reconnectAttempts } = useKnowledgeMapperWebSocket();
-  const { setConnected, isOfflineMode } = useStore();
+  const { setConnected, isOfflineMode, upsertNodes, upsertEdges } = useStore();
   const { checkConnectivity } = useOfflineMode();
+
+  // Load initial graph data on component mount
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        console.log('Loading initial graph data...');
+        const data = await exportGraph();
+        console.log('Loaded initial graph data:', data);
+
+        // Update store with initial data
+        if (data.nodes && data.nodes.length > 0) {
+          upsertNodes(data.nodes);
+        }
+        if (data.edges && data.edges.length > 0) {
+          upsertEdges(data.edges);
+        }
+      } catch (error) {
+        console.error('Error loading initial graph data:', error);
+      }
+    };
+
+    loadInitialData();
+  }, []); // Run once on mount
 
   // Update store connection state based on WebSocket state, but respect offline mode
   useEffect(() => {
     // Don't update connection state if in offline mode
     if (isOfflineMode) return;
-    
+
     let errorMessage: string | null = null;
-    
+
     switch (connectionState) {
       case ConnectionState.CONNECTED:
         setConnected(true);
@@ -36,8 +60,8 @@ const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }) => {
         setConnected(false, `Reconnecting... (attempt ${reconnectAttempts})`);
         break;
       case ConnectionState.DISCONNECTED:
-        errorMessage = reconnectAttempts > 0 
-          ? 'Connection lost - unable to reconnect' 
+        errorMessage = reconnectAttempts > 0
+          ? 'Connection lost - unable to reconnect'
           : 'Disconnected from server';
         setConnected(false, errorMessage);
         break;

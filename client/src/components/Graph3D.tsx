@@ -38,13 +38,11 @@ const Graph3D: React.FC = () => {
   // API call to expand node neighborhood
   const expandNodeNeighborhood = useCallback(async (nodeId: string) => {
     try {
-      const response = await fetch(`/api/neighbors?node_id=${nodeId}&hops=1&limit=200`);
-      if (response.ok) {
-        const data = await response.json();
-        // The backend should broadcast the new nodes/edges via WebSocket
-        // so we don't need to manually update the store here
-        console.log(`Expanded neighborhood for node ${nodeId}:`, data);
-      }
+      const { getNeighbors } = await import('../utils/api');
+      const data = await getNeighbors({ node_id: nodeId, hops: 1, limit: 200 });
+      // The backend should broadcast the new nodes/edges via WebSocket
+      // so we don't need to manually update the store here
+      console.log(`Expanded neighborhood for node ${nodeId}:`, data);
     } catch (error) {
       console.error('Failed to expand node neighborhood:', error);
     }
@@ -170,6 +168,55 @@ const Graph3D: React.FC = () => {
     `;
   }, []);
 
+  // Graph navigation controls
+  const handleResetView = useCallback(() => {
+    if (graphRef.current) {
+      graphRef.current.cameraPosition(
+        { x: 0, y: 0, z: 400 },
+        { x: 0, y: 0, z: 0 },
+        1000
+      );
+      setCameraPosition({ x: 0, y: 0, z: 400 });
+      setCameraTarget({ x: 0, y: 0, z: 0 });
+    }
+  }, [setCameraPosition, setCameraTarget]);
+
+  const handleZoomIn = useCallback(() => {
+    if (graphRef.current) {
+      const currentPos = graphRef.current.cameraPosition();
+      const distance = Math.sqrt(currentPos.x ** 2 + currentPos.y ** 2 + currentPos.z ** 2);
+      const newDistance = Math.max(distance * 0.8, 50); // Minimum zoom distance
+      const factor = newDistance / distance;
+      
+      const newPos = {
+        x: currentPos.x * factor,
+        y: currentPos.y * factor,
+        z: currentPos.z * factor
+      };
+      
+      graphRef.current.cameraPosition(newPos, undefined, 300);
+      setCameraPosition(newPos);
+    }
+  }, [setCameraPosition]);
+
+  const handleZoomOut = useCallback(() => {
+    if (graphRef.current) {
+      const currentPos = graphRef.current.cameraPosition();
+      const distance = Math.sqrt(currentPos.x ** 2 + currentPos.y ** 2 + currentPos.z ** 2);
+      const newDistance = Math.min(distance * 1.25, 2000); // Maximum zoom distance
+      const factor = newDistance / distance;
+      
+      const newPos = {
+        x: currentPos.x * factor,
+        y: currentPos.y * factor,
+        z: currentPos.z * factor
+      };
+      
+      graphRef.current.cameraPosition(newPos, undefined, 300);
+      setCameraPosition(newPos);
+    }
+  }, [setCameraPosition]);
+
   // Initialize graph physics and layout
   useEffect(() => {
     if (graphRef.current) {
@@ -293,55 +340,6 @@ const Graph3D: React.FC = () => {
       </motion.div>
     );
   }
-
-  // Graph navigation controls
-  const handleResetView = useCallback(() => {
-    if (graphRef.current) {
-      graphRef.current.cameraPosition(
-        { x: 0, y: 0, z: 400 },
-        { x: 0, y: 0, z: 0 },
-        1000
-      );
-      setCameraPosition({ x: 0, y: 0, z: 400 });
-      setCameraTarget({ x: 0, y: 0, z: 0 });
-    }
-  }, [setCameraPosition, setCameraTarget]);
-
-  const handleZoomIn = useCallback(() => {
-    if (graphRef.current) {
-      const currentPos = graphRef.current.cameraPosition();
-      const distance = Math.sqrt(currentPos.x ** 2 + currentPos.y ** 2 + currentPos.z ** 2);
-      const newDistance = Math.max(distance * 0.8, 50); // Minimum zoom distance
-      const factor = newDistance / distance;
-      
-      const newPos = {
-        x: currentPos.x * factor,
-        y: currentPos.y * factor,
-        z: currentPos.z * factor
-      };
-      
-      graphRef.current.cameraPosition(newPos, undefined, 300);
-      setCameraPosition(newPos);
-    }
-  }, [setCameraPosition]);
-
-  const handleZoomOut = useCallback(() => {
-    if (graphRef.current) {
-      const currentPos = graphRef.current.cameraPosition();
-      const distance = Math.sqrt(currentPos.x ** 2 + currentPos.y ** 2 + currentPos.z ** 2);
-      const newDistance = Math.min(distance * 1.25, 2000); // Maximum zoom distance
-      const factor = newDistance / distance;
-      
-      const newPos = {
-        x: currentPos.x * factor,
-        y: currentPos.y * factor,
-        z: currentPos.z * factor
-      };
-      
-      graphRef.current.cameraPosition(newPos, undefined, 300);
-      setCameraPosition(newPos);
-    }
-  }, [setCameraPosition]);
 
   return (
     <div className="w-full h-full bg-gray-900 relative">

@@ -377,9 +377,15 @@ async def startup_event():
             from services.ai_provider import initialize_ai_provider, get_ai_provider, AIProviderFactory
             from services.ie_service import InformationExtractionService
             
+            # Check provider configuration first
+            provider_info = AIProviderFactory.get_provider_info()
+            logger.info(f"AI provider configuration: {provider_info}")
+            
+            if not provider_info.get('configured', False):
+                raise Exception(f"AI provider not properly configured: {provider_info}")
+            
             # Initialize AI provider
             ai_provider = initialize_ai_provider()
-            provider_info = AIProviderFactory.get_provider_info()
             logger.info(f"AI provider initialized: {provider_info['provider']} ({provider_info['type']})")
             
             # Initialize IE service
@@ -509,9 +515,18 @@ async def ingest_text(request: IngestRequest):
         
         # Validate services are available
         if not ie_service:
+            from services.ai_provider import AIProviderFactory
+            provider_info = AIProviderFactory.get_provider_info()
+            provider_type = provider_info.get('type', 'unknown')
+            
+            if provider_type == 'azure':
+                detail = "Information extraction service not available. Please check Azure OpenAI configuration (API key, endpoint, deployments)."
+            else:
+                detail = "Information extraction service not available. Please configure OpenAI API key."
+            
             raise HTTPException(
                 status_code=503,
-                detail="Information extraction service not available. Please configure OpenAI API key."
+                detail=detail
             )
         
         # Step 1: Text chunking
@@ -849,24 +864,135 @@ async def get_neighbors(node_id: str, hops: int = 1, limit: int = 200):
         
         logger.info(f"Getting neighbors for node {node_id} (hops={hops}, limit={limit})")
         
-        # Get the center entity
-        center_entity = await qdrant_adapter.get_entity(node_id)
+        # Normalize node ID - add angle brackets if missing
+        normalized_node_id = node_id
+        if not node_id.startswith('<') and not node_id.endswith('>'):
+            normalized_node_id = f"<{node_id}>"
+        
+        # Get the center entity from Oxigraph first, then try Qdrant
+        center_entity = None
+        try:
+            # Try to get from Qdrant first (has full entity data) - use original ID
+            center_entity = await qdrant_adapter.get_entity(node_id)
+        except Exception:
+            pass
+        
         if not center_entity:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Entity {node_id} not found"
+            # If not in Qdrant, check if it exists in Oxigraph
+            try:
+                graph_data = await oxigraph_adapter.export_graph()
+                entities = graph_data.get('entities', [])
+                logger.info(f"Graph export returned {len(entities)} entities")
+                center_nodes = [node for node in entities if node.get("id") == normalized_node_id]
+                logger.info(f"Found {len(center_nodes)} matching nodes for ID {node_id}")
+                if not center_nodes:
+                    # Log first few node IDs for debugging
+                    node_ids = [node.get("id", "NO_ID") for node in entities[:5]]
+                    logger.error(f"Entity {node_id} not found. First 5 node IDs: {node_ids}")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Entity {node_id} not found"
+                    )
+            except Exception as e:
+                logger.error(f"Error calling export_graph: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error accessing graph data: {e}"
+                )
+            # Convert the graph node to entity format
+            center_node = center_nodes[0]
+            from models.core import Entity
+            from datetime import datetime
+            
+            # Parse datetime strings if present
+            created_at = center_node.get("created_at")
+            if isinstance(created_at, str):
+                try:
+                    created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                except:
+                    created_at = datetime.utcnow()
+            elif not created_at:
+                created_at = datetime.utcnow()
+                
+            updated_at = center_node.get("updated_at")
+            if isinstance(updated_at, str):
+                try:
+                    updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                except:
+                    updated_at = datetime.utcnow()
+            elif not updated_at:
+                updated_at = datetime.utcnow()
+            
+            center_entity = Entity(
+                id=center_node["id"],
+                name=center_node["name"],
+                type=center_node["type"],
+                aliases=center_node.get("aliases", []),
+                embedding=center_node.get("embedding", []),
+                salience=center_node.get("salience", 0.5),
+                source_spans=center_node.get("source_spans", []),
+                summary=center_node.get("summary", ""),
+                created_at=created_at,
+                updated_at=updated_at
             )
         
-        # Get neighbors from graph
+        # Get neighbors from graph - use normalized ID (with angle brackets)
         neighbor_info = await oxigraph_adapter.get_neighbors(
-            entity_id=node_id,
+            entity_id=normalized_node_id.strip('<>'),  # Remove angle brackets for the adapter
             hops=hops,
             limit=limit
         )
         
         # Get full entity data for neighbors
         neighbor_ids = [info["entity_id"] for info in neighbor_info]
-        neighbor_entities = await qdrant_adapter.get_entities_by_ids(neighbor_ids)
+        neighbor_entities = []
+        
+        # Try to get from Qdrant first, then fallback to Oxigraph
+        qdrant_entities = await qdrant_adapter.get_entities_by_ids(neighbor_ids)
+        qdrant_entity_ids = {entity.id for entity in qdrant_entities}
+        neighbor_entities.extend(qdrant_entities)
+        
+        # For entities not found in Qdrant, get from Oxigraph
+        missing_ids = [nid for nid in neighbor_ids if nid not in qdrant_entity_ids]
+        if missing_ids:
+            graph_data = await oxigraph_adapter.export_graph()
+            entities = graph_data.get("entities", [])
+            for node in entities:
+                if node.get("id") in missing_ids:
+                    from models.core import Entity
+                    from datetime import datetime
+                    
+                    # Parse datetime strings if present
+                    created_at = node.get("created_at")
+                    if isinstance(created_at, str):
+                        try:
+                            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        except:
+                            created_at = datetime.utcnow()
+                    elif not created_at:
+                        created_at = datetime.utcnow()
+                        
+                    updated_at = node.get("updated_at")
+                    if isinstance(updated_at, str):
+                        try:
+                            updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                        except:
+                            updated_at = datetime.utcnow()
+                    elif not updated_at:
+                        updated_at = datetime.utcnow()
+                    
+                    neighbor_entities.append(Entity(
+                        id=node["id"],
+                        name=node["name"],
+                        type=node["type"],
+                        aliases=node.get("aliases", []),
+                        embedding=node.get("embedding", []),
+                        salience=node.get("salience", 0.5),
+                        source_spans=node.get("source_spans", []),
+                        summary=node.get("summary", ""),
+                        created_at=created_at,
+                        updated_at=updated_at
+                    ))
         
         # Get relationships
         relationships = await oxigraph_adapter.get_entity_relationships(node_id)

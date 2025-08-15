@@ -8,6 +8,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore, useSelectedNode } from '../store/useStore';
 import { NeighborsResponse } from '../types/api';
+import { getNeighbors } from '../utils/api';
 
 
 interface SidePanelProps {
@@ -26,7 +27,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
     upsertEdges,
     edges,
   } = useStore();
-  
+
   const selectedNode = useSelectedNode();
   const [isExpanding, setIsExpanding] = useState(false);
   const [expandError, setExpandError] = useState<string | null>(null);
@@ -34,9 +35,9 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
   // Get evidence quotes from relationships involving the selected node
   const nodeEvidence = useMemo(() => {
     if (!selectedNode) return [];
-    
+
     const evidence: Array<{ quote: string; doc_id: string; predicate: string; confidence: number }> = [];
-    
+
     // Find all edges that involve this node and extract their evidence
     edges.forEach((edge) => {
       if (edge.source === selectedNode.id || edge.target === selectedNode.id) {
@@ -53,7 +54,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
         }
       }
     });
-    
+
     // Sort by confidence and limit to top 5
     return evidence
       .sort((a, b) => b.confidence - a.confidence)
@@ -63,23 +64,23 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
   // Handle expanding node neighborhood
   const handleExpandNeighborhood = useCallback(async (nodeId: string) => {
     if (!nodeId || isExpanding) return;
-    
+
     setIsExpanding(true);
     setExpandError(null);
-    
+
     try {
-      const response = await fetch(`/neighbors?node_id=${nodeId}&hops=1&limit=200`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to expand neighborhood: ${response.statusText}`);
-      }
-      
-      const data: NeighborsResponse = await response.json();
-      
+      const data = await getNeighbors({
+        node_id: nodeId,
+        hops: 1,
+        limit: 200
+      });
+
+      console.log('Expanded neighborhood for node', nodeId, ':', data);
+
       // Update store with new nodes and edges
       upsertNodes(data.neighbors);
       upsertEdges(data.relationships);
-      
+
     } catch (error) {
       console.error('Error expanding neighborhood:', error);
       setExpandError(error instanceof Error ? error.message : 'Failed to expand neighborhood');
@@ -110,7 +111,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
               {selectedNode.type}
             </span>
           </div>
-          
+
           {/* Aliases */}
           {selectedNode.aliases && selectedNode.aliases.length > 0 && (
             <div className="mb-2">
@@ -120,7 +121,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
               </span>
             </div>
           )}
-          
+
           {/* Metrics */}
           <div className="flex items-center space-x-4 text-sm text-gray-400">
             <div>
@@ -185,11 +186,10 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
           <button
             onClick={() => handleExpandNeighborhood(selectedNode.id)}
             disabled={isExpanding}
-            className={`w-full px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-              isExpanding
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700 text-white hover:shadow-lg'
-            }`}
+            className={`w-full px-4 py-2 rounded-lg font-medium text-sm transition-all ${isExpanding
+              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700 text-white hover:shadow-lg'
+              }`}
           >
             {isExpanding ? (
               <div className="flex items-center justify-center space-x-2">
@@ -200,7 +200,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
               'Expand 1-hop Neighborhood'
             )}
           </button>
-          
+
           {expandError && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
@@ -276,7 +276,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
         className="space-y-4"
       >
         <h3 className="text-lg font-semibold text-white">Answer</h3>
-        
+
         {/* Question */}
         <div className="bg-gray-800 rounded-lg p-3 border-l-4 border-blue-500">
           <h4 className="text-sm font-semibold text-gray-300 mb-1">Question</h4>
@@ -382,7 +382,7 @@ const SidePanel: React.FC<SidePanelProps> = ({ isOpen, onClose }) => {
                 </svg>
               </button>
             </div>
-            
+
             {/* Panel content */}
             <div className="flex-1 overflow-y-auto">
               <div className="p-4">
