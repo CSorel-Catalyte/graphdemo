@@ -12,11 +12,12 @@ from abc import ABC, abstractmethod
 from enum import Enum
 
 try:
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, AzureOpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
     AsyncOpenAI = None
+    AzureOpenAI = None
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +156,11 @@ class AzureOpenAIProvider(BaseAIProvider):
         if not OPENAI_AVAILABLE:
             raise AIProviderConfigError("OpenAI library not available. Please install the openai package.")
         
-        self.client = AsyncOpenAI(
-            api_key=api_key,
+        # Use the dedicated AzureOpenAI client for Azure OpenAI
+        self.client = AzureOpenAI(
+            api_version=api_version,
             azure_endpoint=endpoint,
-            api_version=api_version
+            api_key=api_key
         )
         self.chat_deployment = chat_deployment
         self.embedding_deployment = embedding_deployment
@@ -176,10 +178,16 @@ class AzureOpenAIProvider(BaseAIProvider):
         # For Azure, we use deployment names instead of model names
         model = model or self.chat_deployment
         
-        return await self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **kwargs
+        # AzureOpenAI client is sync, so we need to run it in a thread
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                **kwargs
+            )
         )
     
     async def create_embedding(
@@ -190,12 +198,18 @@ class AzureOpenAIProvider(BaseAIProvider):
     ) -> Any:
         """Create an embedding using Azure OpenAI."""
         # For Azure, we use deployment names instead of model names
-        model = model or self.embedding_deployment
+        deployment = model or self.embedding_deployment
         
-        return await self.client.embeddings.create(
-            model=model,
-            input=input_text,
-            **kwargs
+        # AzureOpenAI client is sync, so we need to run it in a thread
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.client.embeddings.create(
+                model=deployment,
+                input=input_text,
+                **kwargs
+            )
         )
     
     def get_default_chat_model(self) -> str:

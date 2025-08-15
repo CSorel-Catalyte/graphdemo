@@ -11,6 +11,9 @@ RUN npm install
 # Copy source code
 COPY . .
 
+# Fix permissions for node_modules/.bin
+RUN chmod +x node_modules/.bin/*
+
 # Expose port
 EXPOSE 3000
 
