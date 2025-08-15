@@ -10,6 +10,7 @@ import SearchBox from './SearchBox';
 import QuestionBox from './QuestionBox';
 import ExportButton from './ExportButton';
 import ImportButton from './ImportButton';
+import LoadTextButton from './LoadTextButton';
 import OfflineIndicator from './OfflineIndicator';
 
 const Header: React.FC = () => {
@@ -54,6 +55,7 @@ const Header: React.FC = () => {
           transition={{ delay: 0.3, duration: 0.5 }}
           className="flex-shrink-0 flex items-center space-x-3"
         >
+          <LoadTextButton />
           <ImportButton />
           <ExportButton />
           <OfflineIndicator />

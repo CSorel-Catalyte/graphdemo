@@ -27,14 +27,14 @@ describe('ImportButton', () => {
   it('renders import button with correct text and icon', () => {
     render(<ImportButton />);
     
-    expect(screen.getByRole('button', { name: /import/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import graph/i })).toBeInTheDocument();
     expect(screen.getByText('Import')).toBeInTheDocument();
   });
 
   it('opens file dialog when clicked', () => {
     render(<ImportButton />);
     
-    const button = screen.getByRole('button', { name: /import/i });
+    const button = screen.getByRole('button', { name: /import graph/i });
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     
     const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => {});
@@ -55,7 +55,7 @@ describe('ImportButton', () => {
   it('has correct accessibility attributes', () => {
     render(<ImportButton />);
     
-    const button = screen.getByRole('button', { name: /import/i });
+    const button = screen.getByRole('button', { name: /import graph/i });
     expect(button).toHaveAttribute('title', 'Import knowledge graph from JSON file');
   });
 });
