@@ -39,6 +39,75 @@ class QdrantAdapter:
         self._connection_retries = 3
         self._retry_delay = 1.0
         
+    def _get_vector_size(self) -> int:
+        """
+        Get the expected vector size based on the configured embedding model.
+        
+        Returns:
+            int: Vector dimension size
+        """
+        import os
+        
+        # Check if using Azure OpenAI
+        if os.getenv("AI_PROVIDER") == "azure":
+            deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
+            if "ada-002" in deployment:
+                return 1536
+            elif "3-large" in deployment:
+                return 3072
+            elif "3-small" in deployment:
+                return 1536
+            else:
+                # Default for unknown Azure models
+                return 1536
+        else:
+            # Standard OpenAI
+            model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")
+            if "ada-002" in model:
+                return 1536
+            elif "3-large" in model:
+                return 3072
+            elif "3-small" in model:
+                return 1536
+            else:
+                # Default for unknown models
+                return 1536
+    
+    def _hex_to_uuid(self, hex_string: str) -> str:
+        """
+        Convert a hex string to a UUID format that Qdrant accepts.
+        
+        Args:
+            hex_string: Hex string (like SHA-256 hash)
+            
+        Returns:
+            str: UUID string
+        """
+        import uuid
+        
+        # Take first 32 characters of hex string and format as UUID
+        if len(hex_string) >= 32:
+            hex_part = hex_string[:32]
+            # Format as UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+            uuid_str = f"{hex_part[:8]}-{hex_part[8:12]}-{hex_part[12:16]}-{hex_part[16:20]}-{hex_part[20:32]}"
+            return uuid_str
+        else:
+            # If hex string is too short, generate a UUID from it
+            return str(uuid.uuid5(uuid.NAMESPACE_DNS, hex_string))
+    
+    def _uuid_to_hex(self, uuid_str: str) -> str:
+        """
+        Convert a UUID back to the original hex string format.
+        
+        Args:
+            uuid_str: UUID string
+            
+        Returns:
+            str: Original hex string
+        """
+        # Remove dashes and return first part of original hex
+        return uuid_str.replace('-', '')[:64]  # Return up to 64 chars (SHA-256 length)
+        
     @with_retry(
         retry_config=RetryConfig(max_retries=3, base_delay=1.0, max_delay=30.0),
         circuit_breaker_name="qdrant_connection",
@@ -67,38 +136,87 @@ class QdrantAdapter:
             raise
     
     async def _ensure_collection_exists(self):
-        """Create collection if it doesn't exist"""
+        """Create collection if it doesn't exist or recreate if dimensions are wrong"""
         try:
             # Check if collection exists
             collections = self.client.get_collections()
             collection_names = [col.name for col in collections.collections]
+            expected_vector_size = self._get_vector_size()
             
-            if self.collection_name not in collection_names:
-                logger.info(f"Creating collection: {self.collection_name}")
+            collection_needs_creation = self.collection_name not in collection_names
+            
+            if self.collection_name in collection_names:
+                # Check if existing collection has correct dimensions
+                try:
+                    # Use a more robust approach to get vector size
+                    collection_info = self.client.get_collection(self.collection_name)
+                    
+                    # Try to access the vector size safely
+                    try:
+                        current_size = collection_info.config.params.vectors.size
+                    except AttributeError:
+                        # Handle different response structure
+                        current_size = collection_info.result.config.params.vectors.size
+                    
+                    if current_size != expected_vector_size:
+                        logger.warning(
+                            f"Collection {self.collection_name} has wrong vector size "
+                            f"({current_size} vs expected {expected_vector_size}). Recreating collection."
+                        )
+                        # Delete and recreate with correct dimensions
+                        self.client.delete_collection(self.collection_name)
+                        collection_needs_creation = True
+                    else:
+                        logger.info(f"Collection {self.collection_name} already exists with correct dimensions ({current_size})")
+                        
+                except Exception as e:
+                    logger.warning(f"Could not check collection dimensions: {e}. Assuming collection needs recreation.")
+                    try:
+                        self.client.delete_collection(self.collection_name)
+                    except Exception as delete_error:
+                        logger.warning(f"Could not delete collection: {delete_error}")
+                    collection_needs_creation = True
+            
+            if collection_needs_creation:
+                logger.info(f"Creating collection: {self.collection_name} with {expected_vector_size} dimensions")
                 
-                # Create collection with 3072-dimensional vectors (OpenAI text-embedding-3-large)
-                self.client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=models.VectorParams(
-                        size=3072,
-                        distance=models.Distance.COSINE
-                    ),
-                    optimizers_config=models.OptimizersConfig(
-                        default_segment_number=2,
-                        max_segment_size=20000,
-                        memmap_threshold=20000,
-                        indexing_threshold=20000,
-                        flush_interval_sec=5,
-                        max_optimization_threads=1
-                    ),
-                    hnsw_config=models.HnswConfig(
-                        m=16,
-                        ef_construct=100,
-                        full_scan_threshold=10000,
-                        max_indexing_threads=0,
-                        on_disk=False
+                # Create collection with optimized configuration
+                try:
+                    self.client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=models.VectorParams(
+                            size=expected_vector_size,
+                            distance=models.Distance.COSINE
+                        ),
+                        optimizers_config=models.OptimizersConfig(
+                            default_segment_number=2,
+                            max_segment_size=20000,
+                            memmap_threshold=20000,
+                            indexing_threshold=20000,
+                            flush_interval_sec=5,
+                            max_optimization_threads=1,
+                            deleted_threshold=0.2,  # Add missing field
+                            vacuum_min_vector_number=1000  # Add missing field
+                        ),
+                        hnsw_config=models.HnswConfig(
+                            m=16,
+                            ef_construct=100,
+                            full_scan_threshold=10000,
+                            max_indexing_threads=0,
+                            on_disk=False
+                        )
                     )
-                )
+                except Exception as config_error:
+                    logger.warning(f"Failed to create collection with optimized config: {config_error}")
+                    logger.info("Falling back to basic collection configuration")
+                    # Fallback to basic configuration
+                    self.client.create_collection(
+                        collection_name=self.collection_name,
+                        vectors_config=models.VectorParams(
+                            size=expected_vector_size,
+                            distance=models.Distance.COSINE
+                        )
+                    )
                 logger.info(f"Collection {self.collection_name} created successfully")
             else:
                 logger.info(f"Collection {self.collection_name} already exists")
@@ -129,6 +247,13 @@ class QdrantAdapter:
         if not entity.embedding:
             logger.warning(f"Entity {entity.id} has no embedding, skipping storage")
             return False
+        
+        # Ensure collection exists before storing
+        try:
+            await self._ensure_collection_exists()
+        except Exception as e:
+            logger.error(f"Failed to ensure collection exists before storing entity: {e}")
+            return False
             
         # Prepare payload with entity metadata
         payload = {
@@ -148,12 +273,15 @@ class QdrantAdapter:
             "updated_at": entity.updated_at.isoformat()
         }
         
+        # Store original entity ID in payload and use UUID for Qdrant point ID
+        payload["original_entity_id"] = entity.id
+        
         # Upsert the entity
         self.client.upsert(
             collection_name=self.collection_name,
             points=[
                 models.PointStruct(
-                    id=entity.id,
+                    id=self._hex_to_uuid(entity.id),
                     vector=entity.embedding,
                     payload=payload
                 )
@@ -178,6 +306,13 @@ class QdrantAdapter:
             return 0
             
         if not entities:
+            return 0
+        
+        # Ensure collection exists before storing
+        try:
+            await self._ensure_collection_exists()
+        except Exception as e:
+            logger.error(f"Failed to ensure collection exists before storing: {e}")
             return 0
             
         try:
@@ -206,9 +341,12 @@ class QdrantAdapter:
                     "updated_at": entity.updated_at.isoformat()
                 }
                 
+                # Store original entity ID in payload and use UUID for Qdrant point ID
+                payload["original_entity_id"] = entity.id
+                
                 points.append(
                     models.PointStruct(
-                        id=entity.id,
+                        id=self._hex_to_uuid(entity.id),
                         vector=entity.embedding,
                         payload=payload
                     )
@@ -243,9 +381,12 @@ class QdrantAdapter:
             return None
             
         try:
+            # Convert entity ID to UUID for Qdrant lookup
+            qdrant_id = self._hex_to_uuid(entity_id)
+            
             result = self.client.retrieve(
                 collection_name=self.collection_name,
-                ids=[entity_id],
+                ids=[qdrant_id],
                 with_payload=True,
                 with_vectors=True
             )
@@ -283,8 +424,16 @@ class QdrantAdapter:
             logger.error("Qdrant client not connected")
             return []
             
-        if len(query_vector) != 3072:
-            logger.error(f"Query vector must be 3072-dimensional, got {len(query_vector)}")
+        expected_size = self._get_vector_size()
+        if len(query_vector) != expected_size:
+            logger.error(f"Query vector must be {expected_size}-dimensional, got {len(query_vector)}")
+            return []
+        
+        # Ensure collection exists before searching
+        try:
+            await self._ensure_collection_exists()
+        except Exception as e:
+            logger.error(f"Failed to ensure collection exists: {e}")
             return []
             
         try:
@@ -363,9 +512,12 @@ class QdrantAdapter:
             return []
             
         try:
+            # Convert entity IDs to UUIDs for Qdrant lookup
+            qdrant_ids = [self._hex_to_uuid(entity_id) for entity_id in entity_ids]
+            
             result = self.client.retrieve(
                 collection_name=self.collection_name,
-                ids=entity_ids,
+                ids=qdrant_ids,
                 with_payload=True,
                 with_vectors=True
             )
@@ -394,8 +546,42 @@ class QdrantAdapter:
             return 0
             
         try:
-            info = self.client.get_collection(self.collection_name)
-            return info.points_count or 0
+            # Use scroll to count entities - this avoids collection info parsing issues
+            scroll_result = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=10000,  # Get up to 10k points to count
+                with_payload=False,
+                with_vectors=False
+            )
+            
+            if scroll_result and len(scroll_result) >= 2:
+                points, next_page_offset = scroll_result
+                count = len(points)
+                
+                # If there might be more points, continue scrolling to get accurate count
+                while next_page_offset:
+                    try:
+                        scroll_result = self.client.scroll(
+                            collection_name=self.collection_name,
+                            offset=next_page_offset,
+                            limit=10000,
+                            with_payload=False,
+                            with_vectors=False
+                        )
+                        if scroll_result and len(scroll_result) >= 2:
+                            more_points, next_page_offset = scroll_result
+                            count += len(more_points)
+                        else:
+                            break
+                    except Exception:
+                        # If scrolling fails, return current count
+                        logger.warning(f"Scrolling stopped early, returning partial count: {count}")
+                        break
+                
+                return count
+            else:
+                return 0
+                
         except Exception as e:
             logger.error(f"Error counting entities: {e}")
             return 0
@@ -472,9 +658,10 @@ class QdrantAdapter:
                     end=span_data["end"]
                 ))
             
-            # Create entity
+            # Create entity using original entity ID from payload
+            original_id = payload.get("original_entity_id", str(point.id))
             entity = Entity(
-                id=str(point.id),
+                id=original_id,
                 name=payload["name"],
                 type=EntityType(payload["type"]),
                 aliases=payload.get("aliases", []),

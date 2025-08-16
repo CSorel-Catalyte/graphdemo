@@ -667,13 +667,40 @@ async def ingest_text(request: IngestRequest):
         stored_entities = 0
         stored_relationships = 0
         
-        # Store entities in Qdrant (if available)
-        if qdrant_adapter:
+        # Generate embeddings for entities before storing in Qdrant
+        if qdrant_adapter and canonical_entities:
             try:
+                # Generate embeddings for entities that don't have them
+                from services.ai_provider import get_ai_provider
+                ai_provider = get_ai_provider()
+                
+                entities_needing_embeddings = [e for e in canonical_entities if not e.embedding]
+                
+                if entities_needing_embeddings:
+                    logger.info(f"Generating embeddings for {len(entities_needing_embeddings)} entities")
+                    
+                    for entity in entities_needing_embeddings:
+                        try:
+                            # Create embedding text from entity name and summary
+                            embedding_text = f"{entity.name}. {entity.summary}"
+                            
+                            response = await ai_provider.create_embedding(
+                                input_text=embedding_text,
+                                encoding_format="float"
+                            )
+                            entity.embedding = response.data[0].embedding
+                            
+                        except Exception as e:
+                            logger.warning(f"Failed to generate embedding for entity {entity.id}: {e}")
+                            # Set empty embedding to avoid storage issues
+                            entity.embedding = []
+                
+                # Store entities in Qdrant
                 stored_entities = await qdrant_adapter.store_entities(canonical_entities)
                 logger.info(f"Stored {stored_entities} entities in Qdrant")
+                
             except Exception as e:
-                logger.error(f"Error storing entities in Qdrant: {e}")
+                logger.error(f"Error generating embeddings or storing entities in Qdrant: {e}")
         
         # Store entities and relationships in Oxigraph (if available)
         if oxigraph_adapter:

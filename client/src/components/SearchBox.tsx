@@ -7,6 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/useStore';
 import { SearchRequest, SearchResponse } from '../types/api';
+import { searchEntities } from '../utils/api';
 
 interface SearchBoxProps {
   className?: string;
@@ -82,19 +83,7 @@ const SearchBox: React.FC<SearchBoxProps> = ({
         k: 8, // Limit to 8 results as per requirements
       };
 
-      const response = await fetch('/api/search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Search failed: ${response.statusText}`);
-      }
-
-      const data: SearchResponse = await response.json();
+      const data = await searchEntities(request);
       setSearchResults(data.results);
       setShowResults(data.results.length > 0);
       setSelectedIndex(-1);

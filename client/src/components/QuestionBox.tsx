@@ -7,6 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/useStore';
 import { QuestionRequest, QuestionResponse } from '../types/api';
+import { askQuestion } from '../utils/api';
 
 interface QuestionBoxProps {
   className?: string;
@@ -51,19 +52,7 @@ const QuestionBox: React.FC<QuestionBoxProps> = ({
         q: question.trim(),
       };
 
-      const response = await fetch('/api/ask', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Question answering failed: ${response.statusText}`);
-      }
-
-      const data: QuestionResponse = await response.json();
+      const data = await askQuestion(request);
       
       // Update store with answer and citations
       setCurrentAnswer(data.answer, data.citations);
