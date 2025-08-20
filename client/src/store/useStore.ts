@@ -25,19 +25,25 @@ const entityToUINode = (entity: Entity): UINode => ({
 });
 
 // Helper function to convert Relationship to UIEdge
-const relationshipToUIEdge = (relationship: Relationship): UIEdge => ({
-  id: `${relationship.from}-${relationship.to}-${relationship.predicate}`,
-  source: relationship.from,
-  target: relationship.to,
-  predicate: relationship.predicate,
-  confidence: relationship.confidence,
-  evidence_count: relationship.evidence.length,
-  evidence: relationship.evidence,
-  width: 0.5 + 2.5 * relationship.confidence, // Width based on confidence
-  color: getEdgeColor(relationship.confidence),
-  opacity: 0.6 + 0.4 * relationship.confidence,
-  selected: false,
-});
+const relationshipToUIEdge = (relationship: Relationship): UIEdge => {
+  // Handle both aliased (from/to) and original (from_entity/to_entity) field names
+  const fromId = relationship.from || (relationship as any).from_entity;
+  const toId = relationship.to || (relationship as any).to_entity;
+  
+  return {
+    id: `${fromId}-${toId}-${relationship.predicate}`,
+    source: fromId,
+    target: toId,
+    predicate: relationship.predicate,
+    confidence: relationship.confidence,
+    evidence_count: relationship.evidence.length,
+    evidence: relationship.evidence,
+    width: 0.5 + 2.5 * relationship.confidence, // Width based on confidence
+    color: getEdgeColor(relationship.confidence),
+    opacity: 0.6 + 0.4 * relationship.confidence,
+    selected: false,
+  };
+};
 
 // Helper function to get node color based on type
 const getNodeColor = (type: string): string => {
@@ -90,10 +96,12 @@ export const useStore = create<AppStore>()(
 
       // Graph actions
       upsertNodes: (entities: Entity[]) => {
+        console.log('Store: upsertNodes called with', entities.length, 'entities');
         const { nodes } = get();
         const newNodes = new Map(nodes);
         
         entities.forEach(entity => {
+          console.log('Processing entity:', entity);
           const uiNode = entityToUINode(entity);
           // Preserve existing position and selection state if node exists
           const existingNode = newNodes.get(entity.id);
@@ -111,14 +119,35 @@ export const useStore = create<AppStore>()(
         });
         
         set({ nodes: newNodes });
+        
+        // Clean up any orphaned edges after node updates
+        get().cleanupOrphanedEdges();
       },
 
       upsertEdges: (relationships: Relationship[]) => {
-        const { edges } = get();
+        console.log('Store: upsertEdges called with', relationships.length, 'relationships');
+        const { edges, nodes } = get();
         const newEdges = new Map(edges);
         
         relationships.forEach(relationship => {
+          console.log('Processing relationship:', relationship);
           const uiEdge = relationshipToUIEdge(relationship);
+          console.log('Created UIEdge:', uiEdge);
+          
+          // Only add edge if both source and target nodes exist
+          const sourceExists = nodes.has(uiEdge.source);
+          const targetExists = nodes.has(uiEdge.target);
+          
+          if (!sourceExists) {
+            console.warn(`Edge source node not found: ${uiEdge.source}`);
+            return;
+          }
+          
+          if (!targetExists) {
+            console.warn(`Edge target node not found: ${uiEdge.target}`);
+            return;
+          }
+          
           // Preserve existing selection state if edge exists
           const existingEdge = newEdges.get(uiEdge.id);
           if (existingEdge) {
@@ -138,6 +167,27 @@ export const useStore = create<AppStore>()(
           highlightedNodes: new Set(),
           highlightedEdges: new Set(),
         });
+      },
+
+      cleanupOrphanedEdges: () => {
+        const { nodes, edges } = get();
+        const newEdges = new Map();
+        
+        edges.forEach((edge, edgeId) => {
+          const sourceExists = nodes.has(edge.source);
+          const targetExists = nodes.has(edge.target);
+          
+          if (sourceExists && targetExists) {
+            newEdges.set(edgeId, edge);
+          } else {
+            console.warn(`Removing orphaned edge: ${edgeId} (source: ${sourceExists}, target: ${targetExists})`);
+          }
+        });
+        
+        if (newEdges.size !== edges.size) {
+          console.log(`Cleaned up ${edges.size - newEdges.size} orphaned edges`);
+          set({ edges: newEdges });
+        }
       },
 
       // Selection actions

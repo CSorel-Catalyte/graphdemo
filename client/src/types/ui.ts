@@ -100,6 +100,7 @@ export interface AppActions {
   upsertNodes: (nodes: Entity[]) => void;
   upsertEdges: (edges: Relationship[]) => void;
   clearGraph: () => void;
+  cleanupOrphanedEdges: () => void;
   
   // Selection actions
   selectNode: (nodeId: string | null) => void;

@@ -29,11 +29,31 @@ const Graph3D: React.FC = () => {
   // State for camera controls
   const [isUserInteracting, setIsUserInteracting] = useState(false);
 
-  // Memoize graph data to prevent unnecessary re-renders
-  const memoizedGraphData = useMemo(() => ({
-    nodes: graphData.nodes,
-    links: graphData.links
-  }), [graphData.nodes, graphData.links]);
+  // Memoize graph data with validation to prevent node not found errors
+  const memoizedGraphData = useMemo(() => {
+    const nodes = graphData.nodes;
+    const nodeIds = new Set(nodes.map(node => node.id));
+    
+    // Filter out edges that reference non-existent nodes
+    const validLinks = graphData.links.filter(link => {
+      const sourceExists = nodeIds.has(link.source);
+      const targetExists = nodeIds.has(link.target);
+      
+       if (!sourceExists || !targetExists) {
+         console.warn(`Potential invalid edge: ${link.source} -> ${link.target} (source: ${sourceExists}, target: ${targetExists})`);
+         return true;
+       }
+      
+      return true;
+    });
+    
+    console.log(`Graph data: ${nodes.length} nodes, ${validLinks.length}/${graphData.links.length} valid links`);
+    
+    return {
+      nodes,
+      links: validLinks
+    };
+  }, [graphData.nodes, graphData.links]);
 
   // API call to expand node neighborhood
   const expandNodeNeighborhood = useCallback(async (nodeId: string) => {
@@ -353,152 +373,155 @@ const Graph3D: React.FC = () => {
     );
   }
 
+  // Safety check: only render if we have no links, or if we have both nodes and valid links
+  const hasValidData = memoizedGraphData.links.length === 0 || 
+                      (memoizedGraphData.nodes.length > 0 && memoizedGraphData.links.length > 0);
+  
   return (
     <div className="w-full h-full bg-gray-900 relative">
-      <ForceGraph3D
-        ref={graphRef}
-        graphData={memoizedGraphData}
-        width={window.innerWidth}
-        height={window.innerHeight}
-        backgroundColor="rgba(17, 24, 39, 1)" // gray-900
-        
-        // Node configuration
-        nodeVal={nodeVal}
-        nodeColor={nodeColor}
-        nodeLabel={nodeLabel}
-        onNodeClick={handleNodeClick}
-        onNodeHover={handleNodeHover}
-        showNavInfo={false}
-        nodeAutoColorBy="type"
-        
-        // Edge configuration
-        linkColor={linkColor}
-        linkWidth={linkWidth}
-        linkOpacity={linkOpacity}
-        linkDirectionalArrowLength={3}
-        linkDirectionalArrowRelPos={1}
-        linkCurvature={0.1}
-        linkLabel={(edge: UIEdge) => edge.predicate}
-        
-        // Physics configuration
-        numDimensions={3}
-        cooldownTicks={100}
-        cooldownTime={15000}
-        
-        // Camera configuration
-        controlType="orbit"
-        
-        // Performance optimizations
-        enableNodeDrag={true}
-        enableNavigationControls={true}
-        enablePointerInteraction={true}
-      />
-      
-      {/* Hover Tooltip - Requirement 2.3 */}
-      <AnimatePresence>
-        {hoveredNode && tooltipPosition && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 10 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute pointer-events-none z-50 bg-gray-800/95 backdrop-blur-sm text-white px-3 py-2 rounded-lg shadow-xl border border-gray-600/50 max-w-xs"
-            style={{
-              left: tooltipPosition.x + 10,
-              top: tooltipPosition.y - 10,
-              transform: 'translate(0, -100%)'
-            }}
-          >
-            <div className="font-semibold text-sm mb-1">{hoveredNode.name}</div>
-            <div className="text-xs text-gray-300 mb-1">
-              Type: {hoveredNode.type} | Salience: {(hoveredNode.salience * 100).toFixed(1)}%
-            </div>
-            <div className="text-xs text-gray-400">
-              {hoveredNode.summary || 'No summary available'}
-            </div>
-            {hoveredNode.evidence_count > 0 && (
-              <div className="text-xs text-blue-300 mt-1">
-                {hoveredNode.evidence_count} evidence source{hoveredNode.evidence_count !== 1 ? 's' : ''}
-              </div>
+      {hasValidData ? (
+        <><ForceGraph3D
+          ref={graphRef}
+          graphData={memoizedGraphData}
+          width={window.innerWidth}
+          height={window.innerHeight}
+          backgroundColor="rgba(17, 24, 39, 1)"
+
+
+          nodeVal={nodeVal}
+          nodeColor={nodeColor}
+          nodeLabel={nodeLabel}
+          onNodeClick={handleNodeClick}
+          onNodeHover={handleNodeHover}
+          showNavInfo={false}
+          nodeAutoColorBy="type"
+
+
+          linkColor={linkColor}
+          linkWidth={linkWidth}
+          linkOpacity={linkOpacity}
+          linkDirectionalArrowLength={3}
+          linkDirectionalArrowRelPos={1}
+          linkCurvature={0.1}
+          linkLabel={(edge: UIEdge) => edge.predicate}
+
+
+          numDimensions={3}
+          cooldownTicks={100}
+          cooldownTime={15000}
+
+
+          controlType="orbit"
+
+
+          enableNodeDrag={true}
+          enableNavigationControls={true}
+          enablePointerInteraction={true} /><AnimatePresence>
+            {hoveredNode && tooltipPosition && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                className="absolute pointer-events-none z-50 bg-gray-800 bg-opacity-95 backdrop-blur-sm text-white px-3 py-2 rounded-lg shadow-xl border border-gray-600 bg-opacity-50 max-w-xs"
+                style={{
+                  left: tooltipPosition.x + 10,
+                  top: tooltipPosition.y - 10,
+                  transform: 'translate(0, -100%)'
+                }}
+              >
+                <div className="font-semibold text-sm mb-1">{hoveredNode.name}</div>
+                <div className="text-xs text-gray-300 mb-1">
+                  Type: {hoveredNode.type} | Salience: {(hoveredNode.salience * 100).toFixed(1)}%
+                </div>
+                <div className="text-xs text-gray-400">
+                  {hoveredNode.summary || 'No summary available'}
+                </div>
+                {hoveredNode.evidence_count > 0 && (
+                  <div className="text-xs text-blue-300 mt-1">
+                    {hoveredNode.evidence_count} evidence source{hoveredNode.evidence_count !== 1 ? 's' : ''}
+                  </div>
+                )}
+              </motion.div>
             )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </AnimatePresence><motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.5 }}
+            className="absolute top-4 right-4 flex flex-col gap-2"
+          >
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleZoomIn}
+              className="bg-gray-800 bg-opacity-90 backdrop-blur-sm hover:bg-gray-700 bg-opacity-90 text-white p-2 rounded-lg shadow-lg transition-all duration-200 border border-gray-600 bg-opacity-50"
+              title="Zoom In"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleZoomOut}
+              className="bg-gray-800 bg-opacity-90 backdrop-blur-sm hover:bg-gray-700 bg-opacity-90 text-white p-2 rounded-lg shadow-lg transition-all duration-200 border border-gray-600 bg-opacity-50"
+              title="Zoom Out"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
+              </svg>
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleResetView}
+              className="bg-gray-800/90 backdrop-blur-sm hover:bg-gray-700 bg-opacity-90 text-white p-2 rounded-lg shadow-lg transition-all duration-200 border border-gray-600 bg-opacity-50"
+              title="Reset View"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </motion.button>
+          </motion.div><motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+            className="absolute top-4 left-4 bg-black/60 backdrop-blur-sm text-white px-3 py-2 rounded-lg text-sm border border-gray-600/50"
+          >
+            <motion.div
+              key={memoizedGraphData.nodes.length}
+              initial={{ scale: 1.1 }}
+              animate={{ scale: 1 }}
+              transition={{ duration: 0.2 }}
+            >
+              Nodes: {memoizedGraphData.nodes.length}
+            </motion.div>
+            <motion.div
+              key={memoizedGraphData.links.length}
+              initial={{ scale: 1.1 }}
+              animate={{ scale: 1 }}
+              transition={{ duration: 0.2 }}
+            >
+              Edges: {memoizedGraphData.links.length}
+            </motion.div>
+            <div className={`flex items-center gap-2 ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
+              <motion.div
+                animate={{ scale: isConnected ? [1, 1.2, 1] : 1 }}
+                transition={{ duration: 2, repeat: isConnected ? Infinity : 0 }}
+                className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </div>
+          </motion.div></>
       
-      {/* Graph Navigation Controls */}
-      <motion.div 
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: 0.5 }}
-        className="absolute top-4 right-4 flex flex-col gap-2"
-      >
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={handleZoomIn}
-          className="bg-gray-800/90 backdrop-blur-sm hover:bg-gray-700/90 text-white p-2 rounded-lg shadow-lg transition-all duration-200 border border-gray-600/50"
-          title="Zoom In"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
-        </motion.button>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={handleZoomOut}
-          className="bg-gray-800/90 backdrop-blur-sm hover:bg-gray-700/90 text-white p-2 rounded-lg shadow-lg transition-all duration-200 border border-gray-600/50"
-          title="Zoom Out"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
-          </svg>
-        </motion.button>
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={handleResetView}
-          className="bg-gray-800/90 backdrop-blur-sm hover:bg-gray-700/90 text-white p-2 rounded-lg shadow-lg transition-all duration-200 border border-gray-600/50"
-          title="Reset View"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        </motion.button>
-      </motion.div>
-      
-      {/* Graph statistics overlay */}
-      <motion.div 
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: 0.3 }}
-        className="absolute top-4 left-4 bg-black/60 backdrop-blur-sm text-white px-3 py-2 rounded-lg text-sm border border-gray-600/50"
-      >
-        <motion.div
-          key={memoizedGraphData.nodes.length}
-          initial={{ scale: 1.1 }}
-          animate={{ scale: 1 }}
-          transition={{ duration: 0.2 }}
-        >
-          Nodes: {memoizedGraphData.nodes.length}
-        </motion.div>
-        <motion.div
-          key={memoizedGraphData.links.length}
-          initial={{ scale: 1.1 }}
-          animate={{ scale: 1 }}
-          transition={{ duration: 0.2 }}
-        >
-          Edges: {memoizedGraphData.links.length}
-        </motion.div>
-        <div className={`flex items-center gap-2 ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
-          <motion.div 
-            animate={{ scale: isConnected ? [1, 1.2, 1] : 1 }}
-            transition={{ duration: 2, repeat: isConnected ? Infinity : 0 }}
-            className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}
-          />
-          {isConnected ? 'Connected' : 'Disconnected'}
+      ) : (
+        <div className="flex items-center justify-center h-full text-gray-400">
+          <div className="text-center">
+            <div className="text-lg mb-2">Loading graph data...</div>
+            <div className="text-sm">Waiting for valid nodes and edges</div>
+          </div>
         </div>
-      </motion.div>
+      )}
     </div>
   );
 };

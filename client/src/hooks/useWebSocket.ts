@@ -42,13 +42,13 @@ export const useKnowledgeMapperWebSocket = () => {
         console.log('WebSocket connected');
         reconnectAttempts.current = 0;
         setConnected(true);
-        
+
         // Show connection restored notification if we were previously disconnected
         if (hasShownConnectionLost.current) {
           showConnectionRestored();
           hasShownConnectionLost.current = false;
         }
-        
+
         // Clear any pending reconnection timeout
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
@@ -59,13 +59,13 @@ export const useKnowledgeMapperWebSocket = () => {
         console.log('WebSocket disconnected:', event.code, event.reason);
         const reason = event.reason || 'Unknown reason';
         setConnected(false, `Connection closed: ${reason}`);
-        
+
         // Show connection lost notification for unexpected disconnections
         if (event.code !== 1000 && !hasShownConnectionLost.current) {
           showConnectionLost();
           hasShownConnectionLost.current = true;
         }
-        
+
         // Attempt to reconnect if not manually closed
         if (event.code !== 1000 && reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
           scheduleReconnect();
@@ -77,9 +77,9 @@ export const useKnowledgeMapperWebSocket = () => {
           type: 'websocket',
           event: event
         });
-        
+
         setConnected(false, 'Connection error occurred');
-        
+
         if (!hasShownConnectionLost.current) {
           showConnectionLost();
           hasShownConnectionLost.current = true;
@@ -125,14 +125,14 @@ export const useKnowledgeMapperWebSocket = () => {
 
     const delay = Math.min(RECONNECT_INTERVAL * Math.pow(2, reconnectAttempts.current), 30000);
     reconnectAttempts.current += 1;
-    
+
     console.log(`Scheduling reconnection attempt ${reconnectAttempts.current} in ${delay}ms`);
-    
+
     // Show reconnecting notification
     if (reconnectAttempts.current === 1) {
       showReconnecting();
     }
-    
+
     reconnectTimeoutRef.current = setTimeout(() => {
       console.log(`Reconnection attempt ${reconnectAttempts.current}`);
       // The useWebSocket hook handles the actual reconnection
@@ -145,41 +145,46 @@ export const useKnowledgeMapperWebSocket = () => {
 
     switch (message.type) {
       case 'upsert_nodes':
+        console.log('Processing nodes:', message.nodes);
         upsertNodes(message.nodes);
         break;
-        
+
       case 'upsert_edges':
-        upsertEdges(message.edges);
+        console.log('Processing edges:', message.edges);
+        // Add a small delay to ensure nodes are processed first
+        setTimeout(() => {
+          upsertEdges(message.edges);
+        }, 100);
         break;
-        
+
       case 'status':
         setProcessing(
           true,
           message.stage,
           message.total ? (message.count / message.total) * 100 : 0
         );
-        
+
         // If processing is complete, clear the processing state after a short delay
-        if (message.stage.toLowerCase().includes('complete') || 
-            message.stage.toLowerCase().includes('finished')) {
+        if (message.stage.toLowerCase().includes('complete') ||
+          message.stage.toLowerCase().includes('finished')) {
           setTimeout(() => {
             setProcessing(false);
           }, 2000);
         }
         break;
-        
+
       case 'error':
         console.error('WebSocket error message:', message.error, message.message);
         setConnected(false, `Server error: ${message.message}`);
         break;
-        
+
       case 'connection':
         console.log('Connection status:', message.status);
         if (message.status === 'connected') {
           setConnected(true);
         }
         break;
-        
+
       default:
         console.warn('Unknown WebSocket message type:', message);
     }
